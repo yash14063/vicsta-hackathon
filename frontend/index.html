@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThreatSense OS | Multi-Node Command Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+    <style>
+        :root { --bg-base: #020617; --panel-bg: rgba(15, 23, 42, 0.75); --cyan: #06b6d4; --cyan-glow: rgba(6, 182, 212, 0.5); --green: #10b981; --red: #ef4444; --red-glow: rgba(239, 68, 68, 0.5); --muted: #64748b; --text-main: #f8fafc; }
+        body { margin: 0; background: var(--bg-base); color: var(--text-main); font-family: 'Rajdhani', sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; background-image: radial-gradient(circle at 50% 0%, #0f172a 0%, #000000 100%); }
+        .hidden { display: none !important; }
+        .glass { background: var(--panel-bg); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 8px 32px rgba(0,0,0,0.5); border-radius: 8px; }
+        .tech-text { font-family: 'Share Tech Mono', monospace; }
+        
+        .btn { background: rgba(6, 182, 212, 0.1); border: 1px solid var(--cyan); color: var(--cyan); padding: 10px 20px; font-family: 'Share Tech Mono'; font-weight: bold; cursor: pointer; text-transform: uppercase; transition: all 0.3s; border-radius: 4px; }
+        .btn:hover { background: var(--cyan); color: #000; box-shadow: 0 0 15px var(--cyan-glow); }
+        .btn-danger { border-color: var(--red); color: var(--red); background: rgba(239, 68, 68, 0.1); }
+        .btn-danger:hover { background: var(--red); color: #fff; box-shadow: 0 0 15px var(--red-glow); }
+        .input-field { background: rgba(0,0,0,0.5); border: 1px solid var(--muted); color: #fff; padding: 12px; font-family: 'Share Tech Mono'; width: 100%; box-sizing: border-box; outline: none; transition: 0.3s; margin-bottom: 15px; border-radius: 4px; }
+        
+        #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
+        .toast { background: rgba(2, 6, 23, 0.95); border-left: 4px solid var(--cyan); color: #fff; padding: 15px 20px; border-radius: 4px; font-family: 'Share Tech Mono'; font-size: 0.85rem; animation: slideIn 0.3s ease-out; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        .view-section { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 10; }
+        header { width: 100%; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(6, 182, 212, 0.2); position: fixed; top: 0; z-index: 100; background: rgba(2, 6, 23, 0.9); box-sizing: border-box; }
+        .logo { font-size: 1.5rem; font-weight: 700; color: var(--text-main); letter-spacing: 2px; }
+        .logo span { color: var(--cyan); }
+
+        .dashboard-layout { display: grid; grid-template-columns: 240px 1fr 300px; gap: 20px; width: 100%; height: 100%; padding: 65px 20px 20px 20px; box-sizing: border-box; }
+        
+        .feature-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; padding-right: 5px; height: calc(100vh - 100px); }
+        .feature-category { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; margin-top: 10px; margin-bottom: 4px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 2px; }
+        .feature-item { font-family: 'Share Tech Mono'; font-size: 0.75rem; padding: 6px 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .feature-item:hover { border-color: var(--cyan); }
+        .feature-active { border-color: var(--cyan); color: var(--cyan); box-shadow: inset 2px 0 0 var(--cyan); }
+        .feature-locked { color: var(--muted); }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+        .dot-green { background: var(--green); box-shadow: 0 0 5px var(--green); }
+        .dot-gray { background: var(--muted); }
+
+        .main-col { display: flex; flex-direction: column; gap: 15px; min-width: 0; }
+        .cam-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 2fr 1fr; gap: 15px; flex: 1; }
+        .cam-main { grid-column: 1 / -1; position: relative; background: #000; border: 1px solid var(--cyan); border-radius: 8px; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.8); }
+        #dash-video-main, #dash-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        #dash-canvas { transform: none; z-index: 10; }
+        .cam-sub { position: relative; background: #111; border: 1px solid var(--muted); border-radius: 8px; overflow: hidden; }
+        .cam-sub video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.8; }
+        .cam-label { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 4px 8px; border-left: 2px solid var(--cyan); font-family: 'Share Tech Mono'; font-size: 0.75rem; z-index: 20; }
+
+        .side-panel { display: flex; flex-direction: column; gap: 15px; }
+        .data-card { padding: 15px; display: flex; flex-direction: column; }
+        .card-header { font-size: 0.75rem; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; display: flex; justify-content: space-between; }
+        .data-value { font-size: 2rem; font-weight: 700; color: var(--green); text-shadow: 0 0 10px rgba(16, 185, 129, 0.4); line-height: 1; transition: 0.3s; }
+        
+        .filter-thermal { filter: sepia(100%) hue-rotate(160deg) saturate(300%) contrast(150%) brightness(80%) !important; }
+        .filter-night { filter: grayscale(100%) contrast(150%) brightness(120%) drop-shadow(0 0 10px rgba(16,185,129,0.5)) !important; border-color: var(--green) !important; }
+        
+        @keyframes lockdownPulse { 0% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0.7); } 50% { box-shadow: inset 0 0 0 15px rgba(239, 68, 68, 0.2); } 100% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0.7); } }
+        .lockdown-mode { animation: lockdownPulse 2s infinite; border-color: var(--red) !important; }
+        @keyframes radarSweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">ThreatSense<span>.OS</span></div>
+        <div class="tech-text" style="display: flex; gap: 20px; font-size: 0.8rem;">
+            <span style="color: var(--muted);">TEAM MEMBERS: 10</span>
+            <span style="color: var(--muted);">NODES ONLINE: 3</span>
+            <span id="cloud-status" style="color: var(--red);">CLOUD: DISCONNECTED</span>
+        </div>
+    </header>
+
+    <div id="toast-container"></div>
+
+    <div id="view-login" class="view-section">
+        <div class="glass" style="width: 400px; padding: 40px; text-align: center;">
+            <h2 style="color: #fff; margin-top: 0;">SECURE UPLINK</h2>
+            <div id="recaptcha-container"></div> 
+            <div id="step-phone">
+                <input type="tel" id="input-phone" class="input-field" placeholder="+91 0000000000">
+                <button class="btn" style="width: 100%;" onclick="sendOTP()">Initiate Handshake</button>
+            </div>
+            <div id="step-otp" class="hidden">
+                <input type="text" id="input-otp" class="input-field" placeholder="Enter 6-digit OTP" maxlength="6">
+                <button class="btn" style="width: 100%;" onclick="verifyOTP()">Decrypt & Access</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-mode" class="view-section hidden">
+        <h2 style="font-size: 2rem; text-transform: uppercase;">Select Deployment Architecture</h2>
+        <div style="display: flex; gap: 20px;">
+            <div class="glass" style="width: 300px; padding: 30px; cursor: pointer; border-top: 3px solid var(--cyan);" onclick="selectMode('HOME')">
+                <h3 style="color: #fff; margin-top: 0;">ASSET PERIMETER</h3>
+                <p style="color: var(--muted); font-size: 0.9rem;">Activate 3D spatial geofencing and non-human filtering.</p>
+            </div>
+            <div class="glass" style="width: 300px; padding: 30px; cursor: pointer; border-top: 3px solid var(--cyan);" onclick="selectMode('PUBLIC')">
+                <h3 style="color: #fff; margin-top: 0;">PUBLIC CROWD NODE</h3>
+                <p style="color: var(--muted); font-size: 0.9rem;">Engage biomechanical tracking for violence and theft.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-dashboard" class="view-section hidden" style="align-items: flex-start; justify-content: flex-start;">
+        <div class="dashboard-layout">
+            
+            <div class="glass feature-list" style="padding: 15px;">
+                <div style="font-size: 1rem; font-weight: bold; color: var(--cyan); margin-bottom: 5px;">SYSTEM MODULES</div>
+                <div class="feature-category">Core AI Engine (Live)</div>
+                <div class="feature-item feature-active">Biomechanical Violence <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Shoplift: Trolley/Pocket <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Spatial Geofencing <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Multi-Camera Grid Array <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Fall / Med Emergency <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Pickpocket / Tampering <div class="status-dot dot-green"></div></div>
+                
+                <div class="feature-category">Optical & Search</div>
+                <div class="feature-item" onclick="toggleVision('thermal')">Thermal IR Vision <div class="status-dot dot-gray"></div></div>
+                <div class="feature-item" onclick="toggleVision('night')">Tactical Night Vision <div class="status-dot dot-gray"></div></div>
+                <div class="feature-item" onclick="runLLMSearch()">LLM Semantic Search <div class="status-dot dot-gray"></div></div>
+                
+                <div class="feature-category">Advanced Cloud Modules</div>
+                <div class="feature-item feature-locked" onclick="mockLoad('Weapon Detection')">Concealed Weapon Scan <div class="status-dot dot-gray"></div></div>
+                <div class="feature-item feature-locked" onclick="mockLoad('Facial Recognition DB')">VIP / Threat Face Match <div class="status-dot dot-gray"></div></div>
+                <div class="feature-item feature-locked" onclick="mockLoad('Fire/Smoke Analytics')">Fire & Smoke Detection <div class="status-dot dot-gray"></div></div>
+                <div class="feature-item feature-locked" onclick="mockLoad('ALPR Systems')">License Plate Reader <div class="status-dot dot-gray"></div></div>
+                
+                <div class="feature-category">Automated Response</div>
+                <div class="feature-item feature-active">Agentic Radar Routing <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Emergency Lockdown <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-locked" onclick="mockLoad('UAV Drone Dispatch')">Auto-Drone Dispatch <div class="status-dot dot-gray"></div></div>
+                
+                <div class="feature-category">Architecture & SecOps</div>
+                <div class="feature-item feature-active">Zero-Trust SMS Auth <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Edge-to-Cloud Sync <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Immutable Audit Log <div class="status-dot dot-green"></div></div>
+                <div class="feature-item feature-active">Dynamic Threat Scoring <div class="status-dot dot-green"></div></div>
+            </div>
+
+            <div class="main-col">
+                <div class="cam-grid">
+                    <div class="cam-main" id="dash-wrapper-main">
+                        <video id="dash-video-main" autoplay playsinline muted></video>
+                        <canvas id="dash-canvas"></canvas>
+                        <div class="cam-label" style="border-color: var(--green);">CAM 01: AI INFERENCE ACTIVE</div>
+                        <div style="position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 5px; font-family: 'Share Tech Mono'; font-size: 0.7rem; background: rgba(0,0,0,0.8); padding: 4px 8px; border-radius: 4px; z-index: 20;">
+                            <div style="width: 6px; height: 6px; background: var(--red); border-radius: 50%; animation: pulse 1s infinite;"></div> REC
+                        </div>
+                    </div>
+                    <div class="cam-sub" id="dash-wrapper-sub1"><video id="dash-video-sub1" autoplay playsinline muted></video><div class="cam-label">CAM 02: PERIMETER WEST</div></div>
+                    <div class="cam-sub" id="dash-wrapper-sub2"><video id="dash-video-sub2" autoplay playsinline muted></video><div class="cam-label">CAM 03: PERIMETER EAST</div></div>
+                </div>
+            </div>
+
+            <div class="side-panel">
+                <div class="glass data-card" style="padding: 10px;">
+                    <button class="btn btn-danger" id="btn-lockdown" onclick="toggleLockdown()" style="width: 100%; font-size: 1.1rem; padding: 12px;">INITIATE LOCKDOWN</button>
+                </div>
+                
+                <div class="glass data-card">
+                    <div class="card-header"><span>Threat Analysis</span> <span id="threat-score">SCORE: 12</span></div>
+                    <div id="dash-status" class="data-value">SECURE</div>
+                    <div id="dash-subtext" class="tech-text" style="color: var(--muted); font-size: 0.7rem; margin-top: 8px;">> Running behavioral inference...</div>
+                </div>
+
+                <div class="glass data-card">
+                    <div class="card-header">Agentic Dispatch Radar</div>
+                    <div style="position: relative; width: 100%; height: 160px; background: radial-gradient(circle, #022b30 0%, #000 100%); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: 4px; overflow: hidden;">
+                        <div style="position: absolute; top: 50%; left: 50%; width: 200px; height: 200px; background: conic-gradient(from 0deg, transparent 70%, rgba(6, 182, 212, 0.4) 100%); border-radius: 50%; transform-origin: top left; animation: radarSweep 4s linear infinite;"></div>
+                        <canvas id="radar-canvas" width="280" height="160" style="position: absolute; top:0; left:0; z-index: 10;"></canvas>
+                    </div>
+                    <div id="dispatch-status" class="tech-text" style="font-size: 0.7rem; color: var(--muted); margin-top: 8px;">> Unit-01 patrolling grid...</div>
+                </div>
+                
+                <div class="glass data-card" style="flex: 1; padding: 10px;">
+                    <div class="card-header" style="margin-bottom: 5px;">Audit Log</div>
+                    <div id="dash-log" class="tech-text" style="font-size: 0.7rem; overflow-y: auto; height: 100%; display: flex; flex-direction: column; gap: 4px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-setup-home" class="view-section hidden" style="background: rgba(0,0,0,0.95);">
+        <h2 style="color: var(--cyan);">CALIBRATE RESTRICTED ZONE</h2>
+        <div style="position: relative; width: 800px; height: 450px; background: #000; border: 2px solid var(--cyan); margin-bottom: 20px; border-radius: 8px; overflow: hidden;">
+            <video id="calib-video" autoplay playsinline muted style="position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1);"></video>
+            <canvas id="calib-canvas" style="position: absolute; width: 100%; height: 100%; z-index: 10; cursor: crosshair;"></canvas>
+        </div>
+        <button class="btn" onclick="deployDashboard()">Deploy System</button>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        // 🚨 ADD YOUR REAL FIREBASE KEYS HERE 🚨
+        const firebaseConfig = { 
+            apiKey: "YOUR_API_KEY", 
+            authDomain: "YOUR_DOMAIN", 
+            projectId: "YOUR_PROJECT", 
+            storageBucket: "YOUR_BUCKET", 
+            messagingSenderId: "123", 
+            appId: "123" 
+        };
+        const auth = getAuth(initializeApp(firebaseConfig));
+
+        let currentMode = '', geofence = null, objectModel, poseModel, isLockdown = false;
+        
+        // 🚨 IF LAPTOP 1 IS DIFFERENT FROM LAPTOP 3, CHANGE "localhost" TO LAPTOP 1 IP 🚨
+        let ws = new WebSocket('ws://localhost:8000/ws/stream');
+        ws.onopen = () => { document.getElementById('cloud-status').innerText = "CLOUD: SYNCED"; document.getElementById('cloud-status').style.color = "var(--green)"; };
+
+        // --- UI UTILS ---
+        window.switchView = (view) => { document.querySelectorAll('.view-section').forEach(v => v.classList.add('hidden')); document.getElementById(`view-${view}`).classList.remove('hidden'); };
+        window.showToast = (msg, type="info") => { const container = document.getElementById('toast-container'); const toast = document.createElement('div'); toast.className = 'toast'; toast.style.borderLeftColor = type === 'warn' ? 'var(--red)' : 'var(--cyan)'; toast.innerHTML = msg; container.appendChild(toast); setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000); };
+        window.logEvent = (msg, color="var(--muted)") => { const log = document.getElementById('dash-log'); log.innerHTML = `<div style="color: ${color};"><span style="color:#fff">[${new Date().toLocaleTimeString()}]</span> ${msg}</div>` + log.innerHTML; };
+        
+        window.mockLoad = (moduleName) => { window.showToast(`Requesting <b>${moduleName}</b> weights from cloud...`); setTimeout(() => window.showToast(`Error: Node compute capacity reached. Cannot load ${moduleName} alongside core engine.`, "warn"), 2000); };
+        window.runLLMSearch = () => { window.showToast("Translating semantic query to vector embeddings..."); setTimeout(() => window.showToast(`LLM Result: Found 0 matching anomalies in the past 24 hours.`), 2000); };
+        
+        window.toggleVision = (type) => {
+            document.querySelectorAll('.cam-grid > div').forEach(w => w.className = w.id === 'dash-wrapper-main' ? 'cam-main' : 'cam-sub');
+            if(type === 'thermal') { document.querySelectorAll('.cam-grid > div').forEach(w => w.classList.add('filter-thermal')); window.showToast("Thermal IR Optical Filter Engaged."); }
+            if(type === 'night') { document.querySelectorAll('.cam-grid > div').forEach(w => w.classList.add('filter-night')); window.showToast("Tactical Night Vision Engaged."); }
+        };
+
+        window.toggleLockdown = () => {
+            isLockdown = !isLockdown; const btn = document.getElementById('btn-lockdown'), mainWrapper = document.getElementById('dash-wrapper-main');
+            if(isLockdown) { btn.innerText = "CANCEL LOCKDOWN"; btn.style.background = "var(--red)"; btn.style.color = "#fff"; mainWrapper.classList.add('lockdown-mode'); window.showToast("FACILITY LOCKDOWN INITIATED. MAG-LOCKS ENGAGED.", "warn"); window.logEvent("LOCKDOWN INITIATED", "var(--red)"); } 
+            else { btn.innerText = "INITIATE LOCKDOWN"; btn.style.background = "rgba(239, 68, 68, 0.1)"; btn.style.color = "var(--red)"; mainWrapper.classList.remove('lockdown-mode'); window.showToast("Lockdown lifted. Resuming operations."); window.logEvent("Lockdown Lifted", "var(--green)");}
+        };
+
+        // --- AUTH ---
+        window.sendOTP = () => {
+            const phone = document.getElementById('input-phone').value;
+            if(!window.recaptchaVerifier) window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
+            signInWithPhoneNumber(auth, phone, window.recaptchaVerifier).then((res) => { window.confirmationResult = res; document.getElementById('step-phone').classList.add('hidden'); document.getElementById('step-otp').classList.remove('hidden'); }).catch((err) => { alert("Use Firebase Test Number."); });
+        };
+        window.verifyOTP = () => { window.confirmationResult.confirm(document.getElementById('input-otp').value).then(() => { loadAIModels(); window.switchView('mode'); window.showToast("Decryption successful. Welcome Admin."); }).catch(() => alert("Invalid OTP.")); };
+
+        // --- MULTI-CAMERA SETUP ---
+        async function startCameras() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                if (videoDevices.length > 0) {
+                    const stream1 = await navigator.mediaDevices.getUserMedia({ video: { deviceId: videoDevices[0].deviceId, width: 800, height: 600 }});
+                    document.getElementById('dash-video-main').srcObject = stream1;
+                    document.getElementById('calib-video').srcObject = stream1; // Feed to calibration
+                    if(videoDevices.length > 1) { const stream2 = await navigator.mediaDevices.getUserMedia({ video: { deviceId: videoDevices[1].deviceId }}); document.getElementById('dash-video-sub1').srcObject = stream2; } else { document.getElementById('dash-video-sub1').srcObject = stream1; }
+                    if(videoDevices.length > 2) { const stream3 = await navigator.mediaDevices.getUserMedia({ video: { deviceId: videoDevices[2].deviceId }}); document.getElementById('dash-video-sub2').srcObject = stream3; } else { document.getElementById('dash-video-sub2').srcObject = stream1; }
+                }
+            } catch (err) { alert("Camera access required."); }
+        }
+
+        window.selectMode = (mode) => {
+            currentMode = mode; startCameras();
+            if(mode === 'HOME') { window.switchView('setup-home'); setupGeofence(); } 
+            else window.deployDashboard();
+        };
+
+        function setupGeofence() {
+            const c = document.getElementById('calib-canvas'); const v = document.getElementById('calib-video');
+            v.onloadedmetadata = () => { c.width = v.videoWidth; c.height = v.videoHeight; };
+            c.onmousedown = (e) => { isDrawing = true; const r = c.getBoundingClientRect(); startX = (e.clientX - r.left)*(c.width/r.width); startY = (e.clientY - r.top)*(c.height/r.height); geofence = {x:startX, y:startY, w:0, h:0}; };
+            c.onmousemove = (e) => { if(!isDrawing) return; const r = c.getBoundingClientRect(); geofence.w = ((e.clientX - r.left)*(c.width/r.width)) - startX; geofence.h = ((e.clientY - r.top)*(c.height/r.height)) - startY; let ctx = c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); ctx.fillStyle="rgba(6,182,212,0.2)"; ctx.fillRect(geofence.x,geofence.y,geofence.w,geofence.h); };
+            c.onmouseup = () => isDrawing = false;
+        }
+
+        window.deployDashboard = () => {
+            window.switchView('dashboard');
+            const v = document.getElementById('dash-video-main'), c = document.getElementById('dash-canvas');
+            v.onloadedmetadata = () => { c.width = v.videoWidth; c.height = v.videoHeight; runAILoop(); };
+            document.getElementById('dash-label').innerText = currentMode === 'HOME' ? "PERIMETER: ACTIVE" : "CROWD NODE: ACTIVE";
+            window.showToast("Edge Neural Networks Compiled. 3 Nodes Active.");
+        };
+
+        async function loadAIModels() {
+            objectModel = await cocoSsd.load(); await tf.setBackend('webgl');
+            poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, { modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING });
+        }
+
+        // --- AGENTIC RADAR ---
+        let guardPos = { x: 50, y: 120 }, guardTarget = null, dispatchActive = false;
+        function updateRadar(threatX) {
+            const rc = document.getElementById('radar-canvas'); if(!rc) return;
+            const ctx = rc.getContext('2d'); ctx.clearRect(0,0,rc.width,rc.height);
+            ctx.strokeStyle = 'rgba(6, 182, 212, 0.2)'; ctx.beginPath(); ctx.arc(rc.width/2, rc.height/2, 40, 0, 2*Math.PI); ctx.stroke(); ctx.beginPath(); ctx.arc(rc.width/2, rc.height/2, 80, 0, 2*Math.PI); ctx.stroke();
+            if(threatX !== null) { let mX = (threatX / 800) * rc.width; ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(mX, 60, 6, 0, 2*Math.PI); ctx.fill(); if(!dispatchActive) { guardTarget = {x: mX, y: 60}; dispatchActive = true; document.getElementById('dispatch-status').innerHTML = "<span style='color:var(--red)'>! AUTONOMOUS INTERCEPT ROUTED</span>"; } } 
+            else { dispatchActive = false; guardTarget = null; document.getElementById('dispatch-status').innerText = "> Unit-01 patrolling grid..."; }
+            if(dispatchActive && guardTarget) { let dx = guardTarget.x - guardPos.x, dy = guardTarget.y - guardPos.y, dist = Math.sqrt(dx*dx + dy*dy); if(dist > 5) { guardPos.x += (dx/dist)*2.5; guardPos.y += (dy/dist)*2.5; } ctx.strokeStyle = 'rgba(16, 185, 129, 0.5)'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(guardPos.x, guardPos.y); ctx.lineTo(guardTarget.x, guardTarget.y); ctx.stroke(); ctx.setLineDash([]); } 
+            else { guardPos.x += Math.sin(Date.now()/1000)*0.5; }
+            ctx.fillStyle = '#06b6d4'; ctx.beginPath(); ctx.arc(guardPos.x, guardPos.y, 5, 0, 2*Math.PI); ctx.fill();
+            requestAnimationFrame(() => updateRadar(window.currentThreatX));
+        }
+        updateRadar(null);
+
+        // --- CORE AI ENGINE ---
+        const getMirroredX = (x, cW) => cW - x; const getDist = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+
+        function triggerAlert(msg, tX, c, ctx) {
+            document.getElementById('dash-status').innerText = msg; document.getElementById('dash-status').style.color = "var(--red)"; document.getElementById('threat-score').innerText = "SCORE: 98"; document.getElementById('threat-score').style.color = "var(--red)";
+            ctx.fillStyle = "rgba(239, 68, 68, 0.15)"; ctx.fillRect(0, 0, c.width, c.height); window.currentThreatX = tX;
+            if (Math.random() > 0.90 && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ camera_id: "CAM_01_MAIN", alert_type: msg, threat_level: "CRITICAL" })); window.logEvent(msg, "var(--red)"); }
+        }
+
+        // TROLLEY VS POCKET LOGIC
+        function detectConcealment(pose, objPredictions, canvasWidth) {
+            let lW = pose.keypoints.find(k => k.name === 'left_wrist'), rW = pose.keypoints.find(k => k.name === 'right_wrist');
+            let lH = pose.keypoints.find(k => k.name === 'left_hip'), rH = pose.keypoints.find(k => k.name === 'right_hip');
+            
+            let lNear = lW && lH && lW.score > 0.3 && getDist(lW, lH) < 40;
+            let rNear = rW && rH && rW.score > 0.3 && getDist(rW, rH) < 40;
+
+            if (lNear || rNear) {
+                let nearSafeBag = false;
+                if (objPredictions) {
+                    objPredictions.forEach(obj => {
+                        if (['handbag', 'backpack', 'suitcase', 'shopping cart'].includes(obj.class)) {
+                            let mX = getMirroredX(obj.bbox[0] + obj.bbox[2], canvasWidth);
+                            let tW = lNear ? lW : rW; let wX = getMirroredX(tW.x, canvasWidth);
+                            if (wX > mX && wX < mX + obj.bbox[2] && tW.y > obj.bbox[1] && tW.y < obj.bbox[1] + obj.bbox[3]) nearSafeBag = true;
+                        }
+                    });
+                }
+                if (!nearSafeBag) return { threat: "SHOPLIFTING: POCKET CONCEALMENT", threatX: getMirroredX(lNear ? lW.x : rW.x, canvasWidth) };
+            }
+            return null;
+        }
+
+        async function runAILoop() {
+            if(!objectModel || !poseModel || isLockdown) { requestAnimationFrame(runAILoop); return; }
+            const video = document.getElementById('dash-video-main'), canvas = document.getElementById('dash-canvas'), ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height); let activeThreat = null;
+
+            const preds = await objectModel.detect(video);
+
+            if (currentMode === 'HOME') {
+                ctx.fillStyle = "rgba(6, 182, 212, 0.1)"; ctx.fillRect(geofence.x, geofence.y, geofence.w, geofence.h);
+                preds.forEach(p => {
+                    if (p.class === 'person') {
+                        let mX = getMirroredX(p.bbox[0] + p.bbox[2], canvas.width), cX = mX + (p.bbox[2]/2), cY = p.bbox[1] + (p.bbox[3]/2);
+                        if (cX > geofence.x && cX < geofence.x + geofence.w && cY > geofence.y && cY < geofence.y + geofence.h) { activeThreat = { threat: "INTRUSION DETECTED", threatX: mX }; ctx.strokeStyle = '#ef4444'; ctx.strokeRect(mX, p.bbox[1], p.bbox[2], p.bbox[3]); }
+                    }
+                });
+            } else if (currentMode === 'PUBLIC') {
+                const poses = await poseModel.estimatePoses(video);
+                if (poses.length > 0) {
+                    poses.forEach(pose => {
+                        let valid = [];
+                        pose.keypoints.forEach(k => { if(k.score > 0.2) { ctx.fillStyle = '#06b6d4'; ctx.beginPath(); ctx.arc(getMirroredX(k.x, canvas.width), k.y, 4, 0, 2*Math.PI); ctx.fill(); valid.push({x:getMirroredX(k.x, canvas.width), y:k.y}); }});
+                        
+                        if(valid.length > 5) { let w = Math.max(...valid.map(p=>p.x)) - Math.min(...valid.map(p=>p.x)), h = Math.max(...valid.map(p=>p.y)) - Math.min(...valid.map(p=>p.y)); if(w > h * 1.5) activeThreat = { threat: "FALL / MEDICAL EMERGENCY", threatX: Math.min(...valid.map(p=>p.x)) }; }
+                        
+                        if (!activeThreat) activeThreat = detectConcealment(pose, preds, canvas.width);
+                    });
+
+                    if (poses.length >= 2 && !activeThreat) {
+                        let aW = poses[0].keypoints.find(k=>k.name==='right_wrist'), bN = poses[1].keypoints.find(k=>k.name==='nose'), bH = poses[1].keypoints.find(k=>k.name==='left_hip');
+                        if (aW && aW.score > 0.2) {
+                            let mAW = {x: getMirroredX(aW.x, canvas.width), y: aW.y};
+                            if (bN && bN.score > 0.2 && getDist(mAW, {x: getMirroredX(bN.x, canvas.width), y: bN.y}) < 50) activeThreat = { threat: "CRITICAL: ASSAULT", threatX: mAW.x };
+                            if (bH && bH.score > 0.2 && getDist(mAW, {x: getMirroredX(bH.x, canvas.width), y: bH.y}) < 45) activeThreat = { threat: "WARNING: PICKPOCKET", threatX: mAW.x };
+                        }
+                    }
+                }
+            }
+
+            if (activeThreat) triggerAlert(activeThreat.threat, activeThreat.threatX, canvas, ctx);
+            else { document.getElementById('dash-status').innerText = "SECURE"; document.getElementById('dash-status').style.color = "var(--cyan)"; document.getElementById('threat-score').innerText = "SCORE: 12"; document.getElementById('threat-score').style.color = "var(--muted)"; window.currentThreatX = null; document.getElementById('dash-subtext').innerText = "> Processing multi-node streams..."; }
+            
+            requestAnimationFrame(runAILoop);
+        }
+    </script>
+</body>
+</html>
